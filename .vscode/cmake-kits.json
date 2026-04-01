@@ -1,0 +1,12 @@
+[
+    {
+        "name": "GCC (System)",
+        "compilers": {
+            "C": "/usr/bin/gcc",
+            "CXX": "/usr/bin/g++"
+        },
+        "preferredGenerator": {
+            "name": "Ninja"
+        }
+    }
+]

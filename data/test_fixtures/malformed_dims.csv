@@ -1,0 +1,5 @@
+Order,Product,Quantity,Length,Width,Height,Weight
+2001,PROD_A,2,400,300,200,10.0
+2001,PROD_B,1,0,400,300,5.0
+2001,PROD_C,2,400,-1,300,5.0
+2001,PROD_D,3,200,200,200,8.0

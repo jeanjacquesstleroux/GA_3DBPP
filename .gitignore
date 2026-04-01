@@ -1,0 +1,24 @@
+# Claude files
+.claude/
+
+# Build artifacts
+build/
+out/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# vcpkg
+vcpkg_installed/
+
+# Compiled output
+*.o
+*.a
+*.so
+*.exe
+
+# OS
+.DS_Store
+Thumbs.db

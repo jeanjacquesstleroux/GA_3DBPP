@@ -1,0 +1,4 @@
+Order,Product,Quantity,Length,Width,Height,Weight
+1001,PROD_A,2,400,300,200,12.5
+1001,PROD_B,1,600,400,300,25.0
+1002,PROD_C,3,100,100,100,2.1
