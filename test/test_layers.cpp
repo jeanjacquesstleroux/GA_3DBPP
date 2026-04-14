@@ -220,10 +220,11 @@ TEST(BlockBuilder, TallItemOverflowsToNewPallet) {
     EXPECT_TRUE(inBounds(containers));
 }
 
-// Single item: generates one layer with 1 item, builds into a block.
+// Single item type: generates one full layer and builds it into a block.
+// q must be >= the layer's item_count so buildBlocks can commit the layer.
 TEST(BlockBuilder, SingleItemOrder) {
     ItemType item;
-    item.l = 500; item.w = 400; item.h = 300; item.m = 5; item.q = 1;
+    item.l = 500; item.w = 400; item.h = 300; item.m = 5; item.q = 10;
 
     Layer full = LayerGenerator::generateFull(item, 0);
     ASSERT_GE(full.item_count, 1);

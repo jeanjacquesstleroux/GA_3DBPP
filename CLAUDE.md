@@ -198,20 +198,20 @@ Write test_extreme_points.cpp (5+ cases)
  
 | Task | Description | Status |
 |------|-------------|--------|
-| 6.1 | Chromosome encoding — permutation of item type indices (not individual items); reduces search space from q! to m! | ⬜ |
-| 6.2 | 10 seeded individuals — 5 sorting criteria (weight, quantity, base area, volume, volume×qty) × asc/desc (Table 5) | ⬜ |
-| 6.3 | Random population fill — `std::shuffle` + `std::mt19937` to fill remaining slots up to population_size | ⬜ |
-| 6.4 | Single-point crossover with repair — exchange segments, detect duplicates + missing genes, replace duplicates with missing | ⬜ |
-| 6.5 | Swap mutation — randomly select two positions in chromosome, swap genes | ⬜ |
-| 6.6 | Binary tournament selection — compare by rank first; on tie, prefer higher crowding distance | ⬜ |
-| 6.7 | Fast non-dominated sorting — assign rank (Pareto front = rank 0, next front = rank 1, …) | ⬜ |
-| 6.8 | Crowding distance — per-objective normalized spread; infinity for boundary solutions | ⬜ |
-| 6.9 | Mu+Lambda selection — combine parent pop (mu) + offspring (lambda), non-dominated sort, select top mu individuals | ⬜ |
-| 6.10 | 3-objective fitness evaluation — decode chromosome via EP placement engine → compute (container count, −volume utilization, wasted space) | ⬜ |
-| 6.11 | Pareto front extraction — collect all rank-0 individuals from final generation | ⬜ |
-| 6.12 | Stagnation detection — track best fitness over generations; stop if no improvement for max_stagnation consecutive generations | ⬜ |
-| 6.13 | GA main loop — init pop → for each gen: select parents → crossover/mutate → evaluate → combine → non-dominated sort → select next gen → check stopping | ⬜ |
-| 6.14 | Write `test/test_nsga2.cpp` — sorting correctness, crossover repair validity, tournament selection, convergence on trivial 3-type instance | ⬜ |
+| 6.1 | Chromosome encoding — permutation of item type indices (not individual items); reduces search space from q! to m! | ✅ Done |
+| 6.2 | 10 seeded individuals — 5 sorting criteria (weight, quantity, base area, volume, volume×qty) × asc/desc (Table 5) | ✅ Done |
+| 6.3 | Random population fill — `std::shuffle` + `std::mt19937` to fill remaining slots up to population_size | ✅ Done |
+| 6.4 | Single-point crossover with repair — exchange segments, detect duplicates + missing genes, replace duplicates with missing | ✅ Done |
+| 6.5 | Swap mutation — randomly select two positions in chromosome, swap genes | ✅ Done |
+| 6.6 | Binary tournament selection — compare by rank first; on tie, prefer higher crowding distance | ✅ Done |
+| 6.7 | Fast non-dominated sorting — assign rank (Pareto front = rank 0, next front = rank 1, …) | ✅ Done |
+| 6.8 | Crowding distance — per-objective normalized spread; infinity for boundary solutions | ✅ Done |
+| 6.9 | Mu+Lambda selection — combine parent pop (mu) + offspring (lambda), non-dominated sort, select top mu individuals | ✅ Done |
+| 6.10 | 3-objective fitness evaluation — decode chromosome via EP placement engine → compute (container count, −volume utilization, wasted space) | ✅ Done |
+| 6.11 | Pareto front extraction — collect all rank-0 individuals from final generation | ✅ Done |
+| 6.12 | Stagnation detection — track best fitness over generations; stop if no improvement for max_stagnation consecutive generations | ✅ Done |
+| 6.13 | GA main loop — init pop → for each gen: select parents → crossover/mutate → evaluate → combine → non-dominated sort → select next gen → check stopping | ✅ Done |
+| 6.14 | Write `test/test_nsga2.cpp` — sorting correctness, crossover repair validity, tournament selection, convergence on trivial 3-type instance | ✅ Done |
 
 Objectives for Phase 6:
 Implement chromosome — permutation of item type indices

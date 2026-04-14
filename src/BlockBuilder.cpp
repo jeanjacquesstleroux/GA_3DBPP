@@ -441,10 +441,32 @@ std::vector<Container> BlockBuilder::buildBlocks(
     sortLayers(half_pass,    item_types);
     sortLayers(quarter_pass, item_types);
 
+    // ── Quantity tracking: never place more items than ItemType::q ───────────
+    std::vector<int> remaining(item_types.size());
+    for (int i = 0; i < (int)item_types.size(); ++i)
+        remaining[i] = item_types[i].q;
+
+    // canCommit: true iff every item type in `layer` has enough stock left.
+    auto canCommit = [&](const Layer& layer) -> bool {
+        std::vector<int> needed(remaining.size(), 0);
+        for (const PlacedItem& pi : layer.placed_items)
+            ++needed[pi.item_type_index];
+        for (int i = 0; i < (int)needed.size(); ++i)
+            if (needed[i] > remaining[i]) return false;
+        return true;
+    };
+
+    // doCommit: deduct placed item counts from remaining after a commit.
+    auto doCommit = [&](const Layer& layer) {
+        for (const PlacedItem& pi : layer.placed_items)
+            --remaining[pi.item_type_index];
+    };
+
     // ── Pass 1: Full layers ─────────────────────────────────────────────────
     if (!full_pass.empty()) newPallet();
 
     for (Layer& layer : full_pass) {
+        if (!canCommit(layer)) continue;  // skip: insufficient remaining stock
         sortPallets();
         bool placed = false;
         for (PalletState& ps : states) {
@@ -468,6 +490,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
             }
 
             commitLayer(cont, to_place, 0, 0, z);
+            doCommit(to_place);
             for (int i = 0; i < 4; ++i) ps.q[i] = z + layer.height;
             placed = true;
             break;
@@ -480,6 +503,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
             for (PalletState& s : states) {
                 if (s.container_index == idx) {
                     commitLayer(containers[idx], layer, 0, 0, 0);
+                    doCommit(layer);
                     for (int i = 0; i < 4; ++i) s.q[i] = layer.height;
                     break;
                 }
@@ -490,6 +514,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
 
     // ── Pass 2: Half layers ─────────────────────────────────────────────────
     for (Layer& layer : half_pass) {
+        if (!canCommit(layer)) continue;
         sortPallets();
         bool placed = false;
 
@@ -543,6 +568,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
             }
 
             commitLayer(cont, to_place, ox, oy, z_place);
+            doCommit(to_place);
             for (int qi_idx : qi) ps.q[qi_idx] = z_place + layer.height;
             placed = true;
             break;
@@ -561,6 +587,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
                 std::array<int,2> qi = fp_a ? std::array<int,2>{0,2}
                                              : std::array<int,2>{0,1};
                 commitLayer(containers[idx], layer, ox, oy, 0);
+                doCommit(layer);
                 for (int qi_idx : qi) ps_ptr->q[qi_idx] = layer.height;
             }
         }
@@ -568,6 +595,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
 
     // ── Pass 3: Quarter layers ──────────────────────────────────────────────
     for (Layer& layer : quarter_pass) {
+        if (!canCommit(layer)) continue;
         sortPallets();
         bool placed = false;
 
@@ -607,6 +635,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
 
             commitLayer(cont, to_place,
                         ox_map[min_q], oy_map[min_q], z_place);
+            doCommit(to_place);
             ps.q[min_q] = z_place + layer.height;
             placed = true;
             break;
@@ -621,6 +650,7 @@ std::vector<Container> BlockBuilder::buildBlocks(
             if (ps_ptr) {
                 // First layer on empty pallet → quadrant 0.
                 commitLayer(containers[idx], layer, 0, 0, 0);
+                doCommit(layer);
                 ps_ptr->q[0] = layer.height;
             }
         }

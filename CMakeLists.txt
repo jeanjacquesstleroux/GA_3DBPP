@@ -25,6 +25,9 @@ add_executable(GA_3DBPP
     src/BlockBuilder.cpp
     src/PalletRegistry.cpp
     src/ExtremePointEngine.cpp
+    src/Packer.cpp
+    src/GeneticOperators.cpp
+    src/NSGA2.cpp
 )
 
 target_include_directories(GA_3DBPP PRIVATE
@@ -38,6 +41,38 @@ target_link_libraries(GA_3DBPP PRIVATE
 
 if(spdlog_FOUND)
     target_link_libraries(GA_3DBPP PRIVATE spdlog::spdlog)
+endif()
+
+add_executable(GA_3DBPPBenchmark
+    src/BenchmarkMain.cpp
+    src/BenchmarkRunner.cpp
+    src/BRReader.cpp
+    src/CSVReader.cpp
+    src/JSONWriter.cpp
+    src/Logger.cpp
+    src/SupportChecker.cpp
+    src/CenterOfMass.cpp
+    src/Hausdorff.cpp
+    src/LayerGenerator.cpp
+    src/BlockBuilder.cpp
+    src/PalletRegistry.cpp
+    src/ExtremePointEngine.cpp
+    src/Packer.cpp
+    src/GeneticOperators.cpp
+    src/NSGA2.cpp
+)
+
+target_include_directories(GA_3DBPPBenchmark PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+target_link_libraries(GA_3DBPPBenchmark PRIVATE
+    nlohmann_json::nlohmann_json
+)
+
+if(spdlog_FOUND)
+    target_link_libraries(GA_3DBPPBenchmark PRIVATE spdlog::spdlog)
 endif()
 
 enable_testing()
@@ -54,6 +89,8 @@ add_executable(GA_3DBPPTests
     test/test_hausdorff.cpp
     test/test_layers.cpp
     test/test_extreme_points.cpp
+    test/test_nsga2.cpp
+    test/test_integration.cpp
     src/BRReader.cpp
     src/CSVReader.cpp
     src/JSONWriter.cpp
@@ -65,6 +102,10 @@ add_executable(GA_3DBPPTests
     src/BlockBuilder.cpp
     src/PalletRegistry.cpp
     src/ExtremePointEngine.cpp
+    src/Packer.cpp
+    src/GeneticOperators.cpp
+    src/NSGA2.cpp
+    src/BenchmarkRunner.cpp
 )
 
 target_include_directories(GA_3DBPPTests PRIVATE
