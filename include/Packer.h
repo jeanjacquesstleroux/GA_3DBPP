@@ -31,10 +31,11 @@ namespace Packer {
 // Returns a PackingSolution with all containers used (seed + any new ones opened).
 // The containers vector in the returned solution is always non-empty.
 [[nodiscard]] PackingSolution decode(
-    const std::vector<int>&      chromosome,
-    const std::vector<int>&      residualCounts,
-    const std::vector<ItemType>& itemTypes,
+    const std::vector<int>&       chromosome,
+    const std::vector<int>&       residualCounts,
+    const std::vector<ItemType>&  itemTypes,
     const std::vector<Container>& seedContainers,
-    int&                          out_unplaced);
+    int&                          out_unplaced,
+    bool                          relaxed = false);
 
 } // namespace Packer

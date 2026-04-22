@@ -291,21 +291,25 @@ TEST(BlockBuilder, ResidualsDetectedForUnpackedItems) {
 }
 
 TEST(BlockBuilder, SpawnNewPalletWhenNoRemainingSpace) {
-    // Fill a pallet to the brim: 14 layers × 100mm = 1400mm = PALLET_H.
+    // Fill exactly one pallet: 14 layers × 100mm = 1400mm = PALLET_H.
+    // Item: l=300 w=200 h=100 → 4×4 = 16 items/layer (100% fill on 1200×800).
+    // q=224 = 14×16 so the while-loop drains all stock across exactly 1 full pallet.
+    // A second tiny item type has no layer template and stays as residual.
+    // With the container 100% full, spawn_new_pallet must be true.
     ItemType item;
-    item.l = 300; item.w = 200; item.h = 100; item.m = 1; item.q = 500;
+    item.l = 300; item.w = 200; item.h = 100; item.m = 1; item.q = 224;  // 14×16
 
-    std::vector<Layer> candidates;
-    Layer full = LayerGenerator::generateFull(item, 0);
-    for (int i = 0; i < 14; ++i) candidates.push_back(full);
+    ItemType residual_item;
+    residual_item.l = 1; residual_item.w = 1; residual_item.h = 1;
+    residual_item.m = 1; residual_item.q = 5;
 
-    std::vector<ItemType> types = {item};
+    std::vector<ItemType> types = {item, residual_item};
+    std::vector<Layer> candidates = {LayerGenerator::generateFull(item, 0)};
+
     auto containers = BlockBuilder::buildBlocks(candidates, types);
-
-    // After 14 layers a pallet should be exactly full (remaining = 0).
-    // Any residuals must trigger spawn_new_pallet.
     auto info = BlockBuilder::computeResiduals(types, containers);
-    if (!info.residuals.empty()) {
-        EXPECT_TRUE(info.spawn_new_pallet);
-    }
+
+    // Type 0 fully packed (container 100% full); type 1 all residual (5 items).
+    ASSERT_FALSE(info.residuals.empty());
+    EXPECT_TRUE(info.spawn_new_pallet);  // free volume = 0 < residual volume
 }

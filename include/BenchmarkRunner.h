@@ -7,6 +7,7 @@
 struct BenchmarkRecord {
     int    instance     = 0;    // 1-based index within the BR file
     double util_pct     = 0.0;  // average volume utilisation across containers (%)
+    double max_util_pct = 0.0;  // utilisation of the single most-filled container (%)
     double time_ms      = 0.0;  // wall-clock time for this instance (ms)
     int    containers   = 0;    // number of containers used
     int    unplaced     = 0;    // items that could not be placed anywhere
@@ -24,7 +25,8 @@ namespace BenchmarkRunner {
 [[nodiscard]] std::vector<BenchmarkRecord> run(
     const std::string& br_path,
     int      max_instances = -1,
-    unsigned seed          = 42);
+    unsigned seed          = 42,
+    bool     relaxed       = false);
 
 // Write `records` to a CSV file at `out_path`.
 // The CSV has a header row followed by one data row per record.

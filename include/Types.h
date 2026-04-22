@@ -236,11 +236,16 @@ struct ExtremePoint {
 // chromosome is an ordered permutation of item-type indices — the GA evolves this sequence.
 // objectives holds the multi-objective fitness scores evaluated from the chromosome.
 // rank and crowding_distance are NSGA-II selection bookkeeping values, set by the GA engine.
+// aux_max_util is an auxiliary metric (not used by NSGA-II dominance/crowding) that records
+// the utilization of the single most-filled container.  It serves as a final tiebreaker in
+// selectBest() when all three objectives are equal — which occurs for high-density BR instances
+// where every feasible chromosome uses the same number of containers and all items are placed.
 struct Individual {
     std::vector<int>    chromosome;         // permutation of item-type indices
-    std::vector<double> objectives;         // TBD Variable: fitness values (e.g. utilization, # containers)
+    std::vector<double> objectives;         // fitness values: [container_count, -avg_util, wasted_vol]
     int    rank               = 0;          // Pareto front rank (0 = best)
     double crowding_distance  = 0.0;        // NSGA-II crowding distance
+    double aux_max_util       = 0.0;        // max single-container utilization (0.0–1.0), tiebreaker only
 };
 
 // PackingSolution is the top-level result of one complete packing run.

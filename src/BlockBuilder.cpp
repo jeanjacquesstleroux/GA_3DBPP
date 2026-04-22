@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Hausdorff.h"
+#include "SupportChecker.h"
 
 // ---------------------------------------------------------------------------
 // Internal helpers — not exposed in the header
@@ -285,32 +286,88 @@ static Layer flipLayer(Layer layer, bool flip_x, bool flip_y,
     return layer;
 }
 
-// bestInterlockVariant — Task 4.9.
+// bestSupportedVariant — Task 4.6 / support-aware version of bestInterlockVariant.
 //
-// Given the layer already placed below (`prev`) and the candidate `next`,
-// returns the symmetry variant of `next` (among 4) that maximises the
-// symmetric Hausdorff distance between the two layers' corner vertices.
-// footprint_l/w are the dimensions of the zone both layers occupy.
-static Layer bestInterlockVariant(const Layer& prev, Layer next,
-                                  int footprint_l, int footprint_w) {
+// Tries all 4 flip variants (original, H-flip, V-flip, HV-flip).  For each,
+// verifies that every item in the variant passes SupportChecker::isSupported
+// when placed at z_base on top of the items already in `cont`.
+//
+// Selection priority:
+//   1. Among variants where ALL items pass support → pick max Hausdorff distance.
+//   2. If no variant passes support → out_all_supported = false and the caller
+//      should skip this pallet (the layer cannot be stacked here without a
+//      support violation).  The best-Hausdorff variant is returned anyway so
+//      the caller can fall through to the new-pallet path (z = 0) if desired.
+//
+// z_base == 0 is always considered supported (floor-resting); the SupportChecker
+// is not invoked in that case.
+//
+// NOTE: We use the same inset (Config::SUPPORT_VERTEX_INSET = 10 mm) as the
+// post-placement audit in BenchmarkRunner / test_integration.  This ensures
+// every Phase 1 layer that passes this check will also pass the final audit,
+// eliminating false violations caused by using inset=0 here vs inset=10 in
+// the audit.  Hausdorff flipping produces at most 1 mm positional offsets, which
+// are well within the 10 mm inset margin for any BR-benchmark item (all dims ≥ 25 mm).
+static Layer bestSupportedVariant(const Layer&     prev,
+                                   Layer            next,
+                                   int              footprint_l,
+                                   int              footprint_w,
+                                   int              z_base,
+                                   const Container& cont,
+                                   bool&            out_all_supported)
+{
     const auto prev_corners = collectTopCorners(prev.placed_items);
+    // Use the same 10 mm inset as the post-placement audit so Phase 1 items
+    // that pass here are guaranteed to pass the final constraint audit.
+    const SupportChecker sc(Config::SUPPORT_VERTEX_INSET);
 
-    Layer best  = next;
-    double best_d = Hausdorff::distance(prev_corners,
-                                         collectTopCorners(next.placed_items));
+    Layer  best_sup;          double best_sup_d   = -1.0;
+    Layer  best_any;          double best_any_d   = -1.0;
+    bool   any_supported      = false;
+    bool   first              = true;
 
-    // Try the other 3 flips; keep the one with the largest Hausdorff distance.
-    const bool flips[3][2] = {{true, false}, {false, true}, {true, true}};
+    // flip_x, flip_y pairs for the 4 symmetry variants.
+    const std::array<std::pair<bool,bool>, 4> flips = {{
+        {false, false},   // original
+        {true,  false},   // H-flip
+        {false, true },   // V-flip
+        {true,  true }    // HV-flip
+    }};
+
     for (const auto& [fx, fy] : flips) {
-        Layer variant = flipLayer(next, fx, fy, footprint_l, footprint_w);
-        double d = Hausdorff::distance(prev_corners,
-                                        collectTopCorners(variant.placed_items));
-        if (d > best_d) {
-            best_d = d;
-            best   = std::move(variant);
+        Layer variant = (fx || fy)
+                       ? flipLayer(next, fx, fy, footprint_l, footprint_w)
+                       : next;
+
+        const double d = Hausdorff::distance(prev_corners,
+                                              collectTopCorners(variant.placed_items));
+
+        // Track the best variant by Hausdorff distance regardless of support.
+        if (first || d > best_any_d) {
+            best_any   = variant;
+            best_any_d = d;
+            first      = false;
+        }
+
+        // Check support: every item placed at z_base must pass SupportChecker.
+        bool ok = true;
+        if (z_base > 0) {
+            for (const PlacedItem& tmpl : variant.placed_items) {
+                PlacedItem pi = tmpl;
+                pi.z = z_base;
+                if (!sc.isSupported(pi, cont.items)) { ok = false; break; }
+            }
+        }
+
+        if (ok && d > best_sup_d) {
+            best_sup   = variant;
+            best_sup_d = d;
+            any_supported = true;
         }
     }
-    return best;
+
+    out_all_supported = any_supported;
+    return any_supported ? best_sup : best_any;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,192 +523,205 @@ std::vector<Container> BlockBuilder::buildBlocks(
     if (!full_pass.empty()) newPallet();
 
     for (Layer& layer : full_pass) {
-        if (!canCommit(layer)) continue;  // skip: insufficient remaining stock
-        sortPallets();
-        bool placed = false;
-        for (PalletState& ps : states) {
-            // A full layer requires all 4 quadrants to be at the same height.
-            int z = ps.q[0];
-            if (ps.q[0] != ps.q[1] || ps.q[0] != ps.q[2] || ps.q[0] != ps.q[3])
-                continue;  // uneven surface — skip this pallet
-            if (z + layer.height > ps.max_h) continue;  // would exceed max height
-
-            Container& cont = containers[ps.container_index];
-
-            // Hausdorff interlocking: if there's a previous layer here, pick
-            // the best flip variant.
-            Layer to_place = layer;
-            if (z > 0) {
-                Layer prev = topLayerAt(cont, z);
-                if (!prev.placed_items.empty()) {
-                    to_place = bestInterlockVariant(prev, to_place,
-                                                    pallet_l, pallet_w);
-                }
-            }
-
-            commitLayer(cont, to_place, 0, 0, z);
-            doCommit(to_place);
-            for (int i = 0; i < 4; ++i) ps.q[i] = z + layer.height;
-            placed = true;
-            break;
-        }
-        if (!placed) {
-            int idx = newPallet();
+        // Repeat the same template until stock is exhausted (Bug 1 fix).
+        while (canCommit(layer)) {
             sortPallets();
-            PalletState& ps = states.back();  // the new pallet has max remaining
-            // Find newly added state (it's the one with container_index == idx)
-            for (PalletState& s : states) {
-                if (s.container_index == idx) {
-                    commitLayer(containers[idx], layer, 0, 0, 0);
-                    doCommit(layer);
-                    for (int i = 0; i < 4; ++i) s.q[i] = layer.height;
-                    break;
+            bool placed = false;
+            for (PalletState& ps : states) {
+                // A full layer requires all 4 quadrants to be at the same height.
+                int z = ps.q[0];
+                if (ps.q[0] != ps.q[1] || ps.q[0] != ps.q[2] || ps.q[0] != ps.q[3])
+                    continue;  // uneven surface — skip this pallet
+                if (z + layer.height > ps.max_h) continue;  // would exceed max height
+
+                Container& cont = containers[ps.container_index];
+
+                // Hausdorff interlocking: if there's a previous layer here, pick
+                // the best flip variant that also satisfies support constraints.
+                Layer to_place = layer;
+                if (z > 0) {
+                    Layer prev = topLayerAt(cont, z);
+                    if (!prev.placed_items.empty()) {
+                        bool sup_ok;
+                        to_place = bestSupportedVariant(prev, to_place,
+                                                        pallet_l, pallet_w,
+                                                        z, cont, sup_ok);
+                        if (!sup_ok) continue;  // no variant passes support — skip pallet
+                    }
+                }
+
+                commitLayer(cont, to_place, 0, 0, z);
+                doCommit(to_place);
+                for (int i = 0; i < 4; ++i) ps.q[i] = z + layer.height;
+                placed = true;
+                break;
+            }
+            if (!placed) {
+                // No existing pallet fits — open a new one and place there.
+                int idx = newPallet();
+                for (PalletState& s : states) {
+                    if (s.container_index == idx) {
+                        commitLayer(containers[idx], layer, 0, 0, 0);
+                        doCommit(layer);
+                        for (int i = 0; i < 4; ++i) s.q[i] = layer.height;
+                        break;
+                    }
                 }
             }
-            (void)ps;
         }
     }
 
     // ── Pass 2: Half layers ─────────────────────────────────────────────────
     for (Layer& layer : half_pass) {
-        if (!canCommit(layer)) continue;
-        sortPallets();
-        bool placed = false;
+        // Repeat the same template until stock is exhausted (Bug 1 fix).
+        while (canCommit(layer)) {
+            sortPallets();
+            bool placed = false;
 
-        for (PalletState& ps : states) {
-            Container& cont = containers[ps.container_index];
-            bool fp_a = isHalfA(layer, pallet_l);
-
-            // Determine which half-zones exist and their current z heights.
-            // Footprint-A: zones are (q[0],q[2]) and (q[1],q[3])
-            // Footprint-B: zones are (q[0],q[1]) and (q[2],q[3])
-            int z0, z1;      // z heights of "zone 0" and "zone 1"
-            int ox0, oy0;    // XY offset to apply when placing in zone 0
-            int ox1, oy1;    // XY offset to apply when placing in zone 1
-            // which q-indices belong to each zone
-            std::array<int,2> qi0, qi1;
-
-            if (fp_a) {
-                z0 = ps.q[0];  // invariant: q[0]==q[2]
-                z1 = ps.q[1];  // invariant: q[1]==q[3]
-                ox0 = 0;          oy0 = 0;
-                ox1 = pallet_l/2; oy1 = 0;
-                qi0 = {0, 2};
-                qi1 = {1, 3};
-            } else {
-                z0 = ps.q[0];  // invariant: q[0]==q[1]
-                z1 = ps.q[2];  // invariant: q[2]==q[3]
-                ox0 = 0; oy0 = 0;
-                ox1 = 0; oy1 = pallet_w/2;
-                qi0 = {0, 1};
-                qi1 = {2, 3};
-            }
-
-            // Choose the lower zone; on tie prefer zone 0 ("first" half).
-            bool use_zone0 = (z0 <= z1);
-            int z_place = use_zone0 ? z0 : z1;
-            int ox      = use_zone0 ? ox0 : ox1;
-            int oy      = use_zone0 ? oy0 : oy1;
-            const std::array<int,2>& qi = use_zone0 ? qi0 : qi1;
-
-            if (z_place + layer.height > ps.max_h) continue;  // won't fit
-
-            // Hausdorff interlocking against the layer already at this z.
-            Layer to_place = layer;
-            if (z_place > 0) {
-                Layer prev = topLayerAt(cont, z_place);
-                if (!prev.placed_items.empty()) {
-                    int fp_l = fp_a ? pallet_l / 2 : pallet_l;
-                    int fp_w = fp_a ? pallet_w     : pallet_w / 2;
-                    to_place = bestInterlockVariant(prev, to_place, fp_l, fp_w);
-                }
-            }
-
-            commitLayer(cont, to_place, ox, oy, z_place);
-            doCommit(to_place);
-            for (int qi_idx : qi) ps.q[qi_idx] = z_place + layer.height;
-            placed = true;
-            break;
-        }
-
-        if (!placed) {
-            // No existing pallet can fit this half layer — open a new one.
-            int idx = newPallet();
-            PalletState* ps_ptr = nullptr;
-            for (PalletState& s : states) {
-                if (s.container_index == idx) { ps_ptr = &s; break; }
-            }
-            if (ps_ptr) {
+            for (PalletState& ps : states) {
+                Container& cont = containers[ps.container_index];
                 bool fp_a = isHalfA(layer, pallet_l);
-                int ox = 0, oy = 0;
-                std::array<int,2> qi = fp_a ? std::array<int,2>{0,2}
-                                             : std::array<int,2>{0,1};
-                commitLayer(containers[idx], layer, ox, oy, 0);
-                doCommit(layer);
-                for (int qi_idx : qi) ps_ptr->q[qi_idx] = layer.height;
+
+                // Determine which half-zones exist and their current z heights.
+                // Footprint-A: zones are (q[0],q[2]) and (q[1],q[3])
+                // Footprint-B: zones are (q[0],q[1]) and (q[2],q[3])
+                int z0, z1;      // z heights of "zone 0" and "zone 1"
+                int ox0, oy0;    // XY offset to apply when placing in zone 0
+                int ox1, oy1;    // XY offset to apply when placing in zone 1
+                // which q-indices belong to each zone
+                std::array<int,2> qi0, qi1;
+
+                if (fp_a) {
+                    z0 = ps.q[0];  // invariant: q[0]==q[2]
+                    z1 = ps.q[1];  // invariant: q[1]==q[3]
+                    ox0 = 0;          oy0 = 0;
+                    ox1 = pallet_l/2; oy1 = 0;
+                    qi0 = {0, 2};
+                    qi1 = {1, 3};
+                } else {
+                    z0 = ps.q[0];  // invariant: q[0]==q[1]
+                    z1 = ps.q[2];  // invariant: q[2]==q[3]
+                    ox0 = 0; oy0 = 0;
+                    ox1 = 0; oy1 = pallet_w/2;
+                    qi0 = {0, 1};
+                    qi1 = {2, 3};
+                }
+
+                // Choose the lower zone; on tie prefer zone 0 ("first" half).
+                bool use_zone0 = (z0 <= z1);
+                int z_place = use_zone0 ? z0 : z1;
+                int ox      = use_zone0 ? ox0 : ox1;
+                int oy      = use_zone0 ? oy0 : oy1;
+                const std::array<int,2>& qi = use_zone0 ? qi0 : qi1;
+
+                if (z_place + layer.height > ps.max_h) continue;  // won't fit
+
+                // Hausdorff interlocking against the layer already at this z,
+                // filtered so only support-compliant variants are accepted.
+                Layer to_place = layer;
+                if (z_place > 0) {
+                    Layer prev = topLayerAt(cont, z_place);
+                    if (!prev.placed_items.empty()) {
+                        int fp_l = fp_a ? pallet_l / 2 : pallet_l;
+                        int fp_w = fp_a ? pallet_w     : pallet_w / 2;
+                        bool sup_ok;
+                        to_place = bestSupportedVariant(prev, to_place, fp_l, fp_w,
+                                                        z_place, cont, sup_ok);
+                        if (!sup_ok) continue;  // no variant passes support — skip pallet
+                    }
+                }
+
+                commitLayer(cont, to_place, ox, oy, z_place);
+                doCommit(to_place);
+                for (int qi_idx : qi) ps.q[qi_idx] = z_place + layer.height;
+                placed = true;
+                break;
+            }
+
+            if (!placed) {
+                // No existing pallet can fit this half layer — open a new one.
+                int idx = newPallet();
+                PalletState* ps_ptr = nullptr;
+                for (PalletState& s : states) {
+                    if (s.container_index == idx) { ps_ptr = &s; break; }
+                }
+                if (ps_ptr) {
+                    bool fp_a = isHalfA(layer, pallet_l);
+                    int ox = 0, oy = 0;
+                    std::array<int,2> qi = fp_a ? std::array<int,2>{0,2}
+                                                 : std::array<int,2>{0,1};
+                    commitLayer(containers[idx], layer, ox, oy, 0);
+                    doCommit(layer);
+                    for (int qi_idx : qi) ps_ptr->q[qi_idx] = layer.height;
+                }
             }
         }
     }
 
     // ── Pass 3: Quarter layers ──────────────────────────────────────────────
     for (Layer& layer : quarter_pass) {
-        if (!canCommit(layer)) continue;
-        sortPallets();
-        bool placed = false;
+        // Repeat the same template until stock is exhausted (Bug 1 fix).
+        while (canCommit(layer)) {
+            sortPallets();
+            bool placed = false;
 
-        for (PalletState& ps : states) {
-            // Find the quadrant with the minimum current z.
-            int min_q = 0;
-            for (int i = 1; i < 4; ++i) {
-                if (ps.q[i] < ps.q[min_q]) min_q = i;
-            }
-
-            // If this is the first layer on an empty pallet, force quadrant 0.
-            bool block_empty = (ps.q[0] == 0 && ps.q[1] == 0 &&
-                                ps.q[2] == 0 && ps.q[3] == 0);
-            if (block_empty) min_q = 0;
-
-            int z_place = ps.q[min_q];
-            if (z_place + layer.height > ps.max_h) continue;
-
-            // XY offsets for each quadrant:
-            //  q[0]: (0,          0         )
-            //  q[1]: (pallet_l/2, 0         )
-            //  q[2]: (0,          pallet_w/2)
-            //  q[3]: (pallet_l/2, pallet_w/2)
-            const int ox_map[4] = {0, pallet_l/2, 0,          pallet_l/2};
-            const int oy_map[4] = {0, 0,          pallet_w/2, pallet_w/2};
-
-            Container& cont = containers[ps.container_index];
-
-            Layer to_place = layer;
-            if (z_place > 0) {
-                Layer prev = topLayerAt(cont, z_place);
-                if (!prev.placed_items.empty()) {
-                    to_place = bestInterlockVariant(prev, to_place,
-                                                    pallet_l/2, pallet_w/2);
+            for (PalletState& ps : states) {
+                // Find the quadrant with the minimum current z.
+                int min_q = 0;
+                for (int i = 1; i < 4; ++i) {
+                    if (ps.q[i] < ps.q[min_q]) min_q = i;
                 }
+
+                // If this is the first layer on an empty pallet, force quadrant 0.
+                bool block_empty = (ps.q[0] == 0 && ps.q[1] == 0 &&
+                                    ps.q[2] == 0 && ps.q[3] == 0);
+                if (block_empty) min_q = 0;
+
+                int z_place = ps.q[min_q];
+                if (z_place + layer.height > ps.max_h) continue;
+
+                // XY offsets for each quadrant:
+                //  q[0]: (0,          0         )
+                //  q[1]: (pallet_l/2, 0         )
+                //  q[2]: (0,          pallet_w/2)
+                //  q[3]: (pallet_l/2, pallet_w/2)
+                const int ox_map[4] = {0, pallet_l/2, 0,          pallet_l/2};
+                const int oy_map[4] = {0, 0,          pallet_w/2, pallet_w/2};
+
+                Container& cont = containers[ps.container_index];
+
+                Layer to_place = layer;
+                if (z_place > 0) {
+                    Layer prev = topLayerAt(cont, z_place);
+                    if (!prev.placed_items.empty()) {
+                        bool sup_ok;
+                        to_place = bestSupportedVariant(prev, to_place,
+                                                        pallet_l/2, pallet_w/2,
+                                                        z_place, cont, sup_ok);
+                        if (!sup_ok) continue;  // no variant passes support — skip pallet
+                    }
+                }
+
+                commitLayer(cont, to_place,
+                            ox_map[min_q], oy_map[min_q], z_place);
+                doCommit(to_place);
+                ps.q[min_q] = z_place + layer.height;
+                placed = true;
+                break;
             }
 
-            commitLayer(cont, to_place,
-                        ox_map[min_q], oy_map[min_q], z_place);
-            doCommit(to_place);
-            ps.q[min_q] = z_place + layer.height;
-            placed = true;
-            break;
-        }
-
-        if (!placed) {
-            int idx = newPallet();
-            PalletState* ps_ptr = nullptr;
-            for (PalletState& s : states) {
-                if (s.container_index == idx) { ps_ptr = &s; break; }
-            }
-            if (ps_ptr) {
-                // First layer on empty pallet → quadrant 0.
-                commitLayer(containers[idx], layer, 0, 0, 0);
-                doCommit(layer);
-                ps_ptr->q[0] = layer.height;
+            if (!placed) {
+                int idx = newPallet();
+                PalletState* ps_ptr = nullptr;
+                for (PalletState& s : states) {
+                    if (s.container_index == idx) { ps_ptr = &s; break; }
+                }
+                if (ps_ptr) {
+                    // First layer on empty pallet → quadrant 0.
+                    commitLayer(containers[idx], layer, 0, 0, 0);
+                    doCommit(layer);
+                    ps_ptr->q[0] = layer.height;
+                }
             }
         }
     }
@@ -690,15 +760,18 @@ BlockBuilder::ResidualInfo BlockBuilder::computeResiduals(
     }
 
     // Compute usable volume remaining on existing containers.
-    // For each container, usable = (pallet_h - top_z) × pallet_l × pallet_w.
-    // top_z = max z+dz across all placed items on that container.
+    // Use actual free volume = container_vol - placed_items_vol.
+    // This is more accurate than the rectangular-column estimate
+    // (pallet_l × pallet_w × (pallet_h - top_z)), which ignores the gaps
+    // between items within a layer created by dynamic shifting.
+    const long long cont_vol = static_cast<long long>(pallet_l) * pallet_w * pallet_h;
     long long v_usable = 0;
     for (const Container& cont : containers) {
-        int top_z = 0;
+        long long items_vol = 0;
         for (const PlacedItem& pi : cont.items) {
-            top_z = std::max(top_z, pi.z + pi.dz);
+            items_vol += static_cast<long long>(pi.dx) * pi.dy * pi.dz;
         }
-        v_usable += static_cast<long long>(pallet_l) * pallet_w * (pallet_h - top_z);
+        v_usable += cont_vol - items_vol;
     }
 
     info.spawn_new_pallet = (v_residual >= v_usable);

@@ -89,6 +89,8 @@ void sortEPs(std::vector<ExtremePoint>& eps);
 [[nodiscard]] bool placeItem(Container&                    cont,
                               const std::vector<ItemType>&  item_types,
                               int                           type_idx,
-                              std::vector<ExtremePoint>&    eps);
+                              std::vector<ExtremePoint>&    eps,
+                              bool                          debug   = false,
+                              bool                          relaxed = false);
 
 } // namespace ExtremePointEngine

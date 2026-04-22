@@ -4,6 +4,17 @@
 #include <vector>
 #include "Types.h"
 
+// GASnapshot records the best individual's full packing at one generation.
+// Used only under --animated-output to build the ga_history in AnimatedSolution.
+// Keeping this struct in NSGA2.h (rather than AnimatedSolution.h) avoids a
+// dependency on animation types inside the core algorithm headers.
+struct GASnapshot {
+    int             generation           = 0;
+    int             best_container_count = 0;
+    double          best_avg_utilization = 0.0;
+    PackingSolution solution;
+};
+
 // NSGA2 — Non-dominated Sorting Genetic Algorithm II.
 //
 // Implements the multi-objective evolutionary optimizer that finds good
@@ -32,7 +43,8 @@ void evaluateFitness(
     Individual&                   ind,
     const std::vector<int>&       residualCounts,
     const std::vector<ItemType>&  itemTypes,
-    const std::vector<Container>& seedContainers);
+    const std::vector<Container>& seedContainers,
+    bool                          relaxed = false);
 
 // ─── Task 6.7: Fast non-dominated sorting ────────────────────────────────────
 //
@@ -98,6 +110,8 @@ void crowdingDistance(std::vector<Individual*>& front);
     const std::vector<int>&       residualCounts,
     const std::vector<ItemType>&  itemTypes,
     const std::vector<Container>& seedContainers,
-    std::mt19937&                 rng);
+    std::mt19937&                 rng,
+    bool                          relaxed    = false,
+    std::vector<GASnapshot>*      ga_history = nullptr);
 
 } // namespace NSGA2

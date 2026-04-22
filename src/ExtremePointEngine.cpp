@@ -49,6 +49,38 @@ static bool isInterior(int px, int py, int pz, const Container& cont) {
     return false;
 }
 
+// ─── Internal helpers (continued) ───────────────────────────────────────────
+
+// Remove interior EPs and deduplicate.  Does NOT apply dominance pruning.
+// Used by init() so that EPs at higher z (on top of Phase 1 blocks) survive
+// alongside low-z gap EPs generated from the same block surface.  If dominance
+// were applied here, a 2 mm gap EP at (x, y, 0) would eliminate a perfectly
+// valid (x, y, 28) EP that sits on top of the block — leaving the decoder with
+// no way to continue once the low-z gap is AABB-blocked.
+static void pruneNoDominate(std::vector<ExtremePoint>& eps, const Container& cont) {
+    // ── Step 1: remove interior EPs ─────────────────────────────────────────
+    eps.erase(
+        std::remove_if(eps.begin(), eps.end(),
+            [&](const ExtremePoint& ep) {
+                return isInterior(ep.x, ep.y, ep.z, cont);
+            }),
+        eps.end());
+
+    // ── Step 2: deduplicate ──────────────────────────────────────────────────
+    std::sort(eps.begin(), eps.end(),
+        [](const ExtremePoint& a, const ExtremePoint& b) {
+            if (a.z != b.z) return a.z < b.z;
+            if (a.x != b.x) return a.x < b.x;
+            return a.y < b.y;
+        });
+    eps.erase(
+        std::unique(eps.begin(), eps.end(),
+            [](const ExtremePoint& a, const ExtremePoint& b) {
+                return a.x == b.x && a.y == b.y && a.z == b.z;
+            }),
+        eps.end());
+}
+
 // ─── Public functions ────────────────────────────────────────────────────────
 
 void init(std::vector<ExtremePoint>& eps, const Container& cont) {
@@ -69,7 +101,11 @@ void init(std::vector<ExtremePoint>& eps, const Container& cont) {
         generateFrom(pi, eps);
     }
     project(eps, cont);
-    prune(eps, cont);
+    // Use interior+dedup only — NO dominance.  Dominance would eliminate valid
+    // EPs on top of Phase 1 block surfaces when a lower-z gap EP happens to
+    // have the same (x, y) prefix, leaving the decoder unable to fill those
+    // surfaces after the gap is AABB-blocked.
+    pruneNoDominate(eps, cont);
     sortEPs(eps);
 }
 
@@ -167,10 +203,20 @@ void sortEPs(std::vector<ExtremePoint>& eps) {
 bool placeItem(Container&                   cont,
                const std::vector<ItemType>& item_types,
                int                          type_idx,
-               std::vector<ExtremePoint>&   eps)
+               std::vector<ExtremePoint>&   eps,
+               bool debug,
+               bool relaxed)
 {
     const ItemType& it = item_types[type_idx];
     const SupportChecker sc;  // uses Config::SUPPORT_VERTEX_INSET by default
+
+    if (debug) {
+        printf("[DBG] placeItem type=%d (l=%d w=%d h=%d), %d EPs, %d items in cont\n",
+               type_idx, it.l, it.w, it.h,
+               (int)eps.size(), (int)cont.items.size());
+        for (int ei = 0; ei < (int)eps.size() && ei < 6; ++ei)
+            printf("  EP[%d]=(%d,%d,%d)\n", ei, eps[ei].x, eps[ei].y, eps[ei].z);
+    }
 
     for (auto it_ep = eps.begin(); it_ep != eps.end(); ++it_ep) {
         // Copy the EP coordinates before any mutation of the eps vector.
@@ -190,23 +236,42 @@ bool placeItem(Container&                   cont,
             pi.dz = it.h;
 
             // Hard constraint 2: item must not exceed container bounds.
-            if (!AABB::fitsInContainer(pi, cont)) continue;
+            if (!AABB::fitsInContainer(pi, cont)) {
+                if (debug) printf("  EP(%d,%d,%d) ori=%d: FAIL bounds\n",ex,ey,ez,(int)ori);
+                continue;
+            }
 
             // Hard constraint 2: no volumetric collision with existing items.
             bool collides = false;
-            for (const PlacedItem& other : cont.items) {
-                if (AABB::overlaps(pi, other)) {
+            int  coll_idx = -1;
+            for (int ci2 = 0; ci2 < (int)cont.items.size(); ++ci2) {
+                if (AABB::overlaps(pi, cont.items[ci2])) {
                     collides = true;
+                    coll_idx = ci2;
                     break;
                 }
             }
-            if (collides) continue;
+            if (collides) {
+                if (debug) printf("  EP(%d,%d,%d) ori=%d dx=%d dy=%d: FAIL AABB vs item[%d]\n",
+                                  ex,ey,ez,(int)ori,pi.dx,pi.dy,coll_idx);
+                continue;
+            }
 
             // Soft constraint 4 (support): EP projection guarantees a surface
             // exists below the item, but does not verify that it covers enough
             // of the base area.  SupportChecker enforces the tiered area/vertex
             // thresholds from Config.h.
-            if (!sc.isSupported(pi, cont.items)) continue;
+            // In relaxed mode (benchmark comparison vs. Table 7) the support
+            // check is skipped so packing density matches the paper's relaxed
+            // results: items need only satisfy bounds + AABB non-collision.
+            if (!relaxed && !sc.isSupported(pi, cont.items)) {
+                if (debug) printf("  EP(%d,%d,%d) ori=%d dx=%d dy=%d: FAIL support\n",
+                                  ex,ey,ez,(int)ori,pi.dx,pi.dy);
+                continue;
+            }
+
+            if (debug) printf("  EP(%d,%d,%d) ori=%d dx=%d dy=%d: PLACED\n",
+                              ex,ey,ez,(int)ori,pi.dx,pi.dy);
 
             // All checked constraints pass — commit the placement.
             cont.items.push_back(pi);
@@ -215,9 +280,13 @@ bool placeItem(Container&                   cont,
             it_ep = eps.erase(it_ep);  // it_ep now points to the element after the erased one
 
             // Generate 3 new raw EPs, then project → prune → sort.
+            // Use pruneNoDominate so that EPs above Phase 1 block surfaces are not
+            // eliminated by lower-z gap EPs that happen to share the same (x,y)
+            // prefix.  Interior removal (step 1) still discards EPs that land inside
+            // any placed item, keeping the list compact.
             generateFrom(pi, eps);
             project(eps, cont);
-            prune(eps, cont);
+            pruneNoDominate(eps, cont);
             sortEPs(eps);
 
             return true;

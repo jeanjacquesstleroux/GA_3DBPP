@@ -1,0 +1,26 @@
+[2026-04-22 14:53:28.883] [info] Animated output mode enabled
+[2026-04-22 14:53:28.883] [info] Reading '/home/ubuntu/repos/GA_3DBPP/data/br_benchmark/thpack2.txt'
+[2026-04-22 14:53:28.884] [info] BR format — instance 1: container 587×233×220, 5 item type(s)
+[2026-04-22 14:53:28.884] [info] Order instance_1 — 5 item type(s), 81 total items
+[2026-04-22 14:53:28.884] [info] Phase 1: 3 layer candidate(s) pass fill-rate filter
+[2026-04-22 14:53:28.884] [info] Phase 1: 1 container(s) used for blocks
+[2026-04-22 14:53:28.884] [info] Animated Phase 1 — container 0, first 10 item(s):
+[2026-04-22 14:53:28.884] [info]   [0] order=0 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [1] order=1 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [2] order=2 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [3] order=3 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [4] order=4 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [5] order=5 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [6] order=6 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [7] order=7 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [8] order=8 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info]   [9] order=9 layer=0 z=0 dz=30
+[2026-04-22 14:53:28.884] [info] Phase 1: 5 residual item type(s)
+[2026-04-22 14:53:28.884] [info] Phase 2: GA on 5 residual type(s) across 1 seed container(s)
+[2026-04-22 14:53:29.185] [info] GA complete — Pareto front: 100 solution(s)
+[2026-04-22 14:53:29.185] [info] Selected: 2 container(s), utilization 49.4%, wasted 30443238 mm^3
+[2026-04-22 14:53:29.187] [info] Animated Phase 2 — 66 item(s) tagged across 2 container(s)
+[2026-04-22 14:53:29.187] [info] Animated GA history — 3 snapshot(s) recorded
+[2026-04-22 14:53:29.187] [info]   gen 0: 2 container(s), avg_util=49.4%
+[2026-04-22 14:53:29.189] [info] Solution written to '/home/ubuntu/repos/GA_3DBPP/output/solution_animated.json' (0.30s)
+[2026-04-22 14:53:29.194] [info] Animated solution written to '/home/ubuntu/repos/GA_3DBPP/output/solution_animated.json'

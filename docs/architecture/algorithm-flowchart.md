@@ -10,7 +10,7 @@ flowchart TD
     subgraph PHASE1 ["Phase 1: Constructive Heuristics"]
         direction TB
         LAYER_GEN["Generate layers per item type<br/><i>LayerGenerator::generateLayers()</i><br/>Full (L×W), Half (L/2×W), Quarter (L/2×W/2)"]
-        LAYER_GEN --> FILL_CHECK{"Fill rate ≥<br/>90% / 90% / 85%?"}
+        LAYER_GEN --> FILL_CHECK{"Fill rate ≥<br/>95% / 90% / 85%?"}
         FILL_CHECK -- "Yes" --> ACCEPT_LAYER["Accept layer<br/>Apply dynamic shifting<br/>(push items to pallet edges)"]
         FILL_CHECK -- "No" --> REJECT_LAYER["Reject layer<br/>Items remain as residuals"]
         ACCEPT_LAYER --> MERGE["Merge layers by matching height<br/>Quarter → Half → Full"]

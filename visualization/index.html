@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GA-3DBPP Demo</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+
+  <!-- Three.js r170 and OrbitControls served from local lib/ — no CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three":          "/static/js/lib/three.module.min.js",
+      "three/addons/":  "/static/js/lib/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header id="header">
+    <span class="logo">GA_3DBPP Demo</span>
+    <div id="spinner"></div>
+    <button id="run-btn">&#9654; Run</button>
+  </header>
+
+  <!-- ── Main two-column body ───────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- ── Left sidebar ──────────────────────────────────────────────────── -->
+    <aside id="sidebar">
+
+      <!-- Dataset selector -->
+      <div class="sidebar-section" id="dataset-section">
+        <label for="dataset-select">Dataset</label>
+        <select id="dataset-select">
+          <option disabled selected value="">Loading datasets…</option>
+        </select>
+      </div>
+
+      <!-- Transport controls -->
+      <div class="sidebar-section" id="controls-section">
+        <div id="transport">
+          <button id="restart-btn"   title="Restart"        disabled>&#9198;</button>
+          <button id="step-back-btn" title="Step back"      disabled>&#9194;</button>
+          <button id="play-pause-btn"                        disabled>&#9654;</button>
+          <button id="step-fwd-btn"  title="Step forward"   disabled>&#9193;</button>
+        </div>
+
+        <div id="speed-row">
+          <label for="speed-slider">Speed</label>
+          <input type="range" id="speed-slider" min="0" max="4" step="1" value="2">
+          <span id="speed-label">1.0x</span>
+        </div>
+
+        <div id="container-dots"></div>
+      </div>
+
+      <!-- Layer manifest panel -->
+      <div class="sidebar-section" id="layer-panel">
+        <h3>Layer Breakdown</h3>
+        <div id="layer-list">
+          <span style="color:var(--text-muted);font-size:12px;">Run algorithm to see layers.</span>
+        </div>
+      </div>
+
+      <!-- Stats panel -->
+      <div class="sidebar-section" id="stats-panel">
+        <h3>Stats</h3>
+        <table id="stats-table">
+          <tr><td>Dataset</td>      <td id="stat-dataset">—</td></tr>
+          <tr><td>Containers</td>   <td id="stat-containers">—</td></tr>
+          <tr><td>Items</td>        <td id="stat-items">—</td></tr>
+          <tr><td>Avg Util</td>     <td id="stat-avg-util">—</td></tr>
+          <tr><td>GA Gens</td>      <td id="stat-ga-gens">—</td></tr>
+          <tr><td>Pallet Util</td>  <td id="stat-cur-util">—</td></tr>
+        </table>
+      </div>
+
+    </aside>
+
+    <!-- ── Center Three.js viewport ─────────────────────────────────────── -->
+    <div id="viewport-wrap">
+
+      <canvas id="three-canvas"></canvas>
+
+      <!-- Container navigation — prev/next for inspecting packed containers -->
+      <div id="container-nav" class="hidden">
+        <button id="container-prev-btn" title="Previous container">&#8592;</button>
+        <span id="container-nav-label">Container 1 / 1</span>
+        <button id="container-next-btn" title="Next container">&#8594;</button>
+      </div>
+
+      <!-- Loading overlay shown while server runs the algorithm -->
+      <div id="loading-overlay" class="hidden">
+        <div class="spinner"></div>
+        <p id="loading-text">Running algorithm…</p>
+      </div>
+
+    </div>
+
+  </div><!-- #main -->
+
+</div><!-- #app -->
+
+<!-- Error toast — shown on /run failure -->
+<div id="error-toast" class="hidden"></div>
+
+<!-- Speed slider label mapping — referenced by controls.js -->
+<script>
+  // Expose speed steps globally so controls.js can read them before it loads.
+  window.SPEED_STEPS = [0.25, 0.5, 1.0, 2.0, 5.0];
+</script>
+
+<!-- App entry point -->
+<script type="module" src="/static/js/app.js"></script>
+
+</body>
+</html>

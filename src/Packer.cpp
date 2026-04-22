@@ -38,7 +38,8 @@ PackingSolution decode(
     const std::vector<int>&       residualCounts,
     const std::vector<ItemType>&  itemTypes,
     const std::vector<Container>& seedContainers,
-    int&                          out_unplaced)
+    int&                          out_unplaced,
+    bool                          relaxed)
 {
     out_unplaced = 0;
 
@@ -82,7 +83,8 @@ PackingSolution decode(
 
             while (!placed) {
                 placed = ExtremePointEngine::placeItem(
-                    sol.containers[active], itemTypes, type_idx, eps[active]);
+                    sol.containers[active], itemTypes, type_idx, eps[active],
+                    /*debug=*/false, relaxed);
 
                 if (!placed) {
                     const int next = active + 1;

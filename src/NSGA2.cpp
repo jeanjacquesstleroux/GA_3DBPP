@@ -42,11 +42,12 @@ void evaluateFitness(
     Individual&                   ind,
     const std::vector<int>&       residualCounts,
     const std::vector<ItemType>&  itemTypes,
-    const std::vector<Container>& seedContainers)
+    const std::vector<Container>& seedContainers,
+    bool                          relaxed)
 {
     int unplaced = 0;
     PackingSolution sol = Packer::decode(
-        ind.chromosome, residualCounts, itemTypes, seedContainers, unplaced);
+        ind.chromosome, residualCounts, itemTypes, seedContainers, unplaced, relaxed);
 
     const int    n_containers = static_cast<int>(sol.containers.size());
     const double avg_util     = sol.avgUtilization();
@@ -64,6 +65,23 @@ void evaluateFitness(
         }
         wasted += cap - used;
     }
+
+    // Auxiliary metric: utilization of the single most-filled container.
+    // Not used by NSGA-II dominance/crowding (paper-compliant 3-objective scheme).
+    // Stored so selectBest() can use it as a final tiebreaker when all three
+    // objectives are equal — this happens for high-density BR instances where
+    // every chromosome produces the same container count and all items are placed.
+    double max_util = 0.0;
+    for (const Container& c : sol.containers) {
+        const double cap = static_cast<double>(c.L) * c.W * c.H;
+        if (cap <= 0.0) continue;
+        double used = 0.0;
+        for (const PlacedItem& pi : c.items)
+            used += static_cast<double>(pi.dx) * pi.dy * pi.dz;
+        const double u = used / cap;
+        if (u > max_util) max_util = u;
+    }
+    ind.aux_max_util = max_util;
 
     // Penalty for any items that could not be placed even in a fresh empty
     // container (physically infeasible items).  A penalty of 1000× the raw
@@ -246,7 +264,9 @@ std::vector<Individual> run(
     const std::vector<int>&       residualCounts,
     const std::vector<ItemType>&  itemTypes,
     const std::vector<Container>& seedContainers,
-    std::mt19937&                 rng)
+    std::mt19937&                 rng,
+    bool                          relaxed,
+    std::vector<GASnapshot>*      ga_history)
 {
     // Edge case: nothing to pack — return an empty population immediately.
     if (residualTypes.empty()) return {};
@@ -256,7 +276,7 @@ std::vector<Individual> run(
 
     // Evaluate fitness for every individual in the initial population.
     for (Individual& ind : pop) {
-        evaluateFitness(ind, residualCounts, itemTypes, seedContainers);
+        evaluateFitness(ind, residualCounts, itemTypes, seedContainers, relaxed);
     }
 
     // Initial non-dominated sort + crowding so that tournament selection has
@@ -272,6 +292,40 @@ std::vector<Individual> run(
     int stagnation     = 0;
 
     std::uniform_real_distribution<double> unit(0.0, 1.0);
+
+    // ── GA history recording (animated output only) ───────────────────────────
+    // Interval: every GA_HISTORY_INTERVAL generations, plus generation 0 and
+    // the last generation.  When GA_NGEN < 20 the interval collapses to 1 so
+    // every generation is recorded.
+    const int history_interval = (Config::GA_NGEN < 20) ? 1 : Config::GA_HISTORY_INTERVAL;
+
+    // Lambda: find the best Individual in pop using the same selectBest() logic
+    // as main.cpp (min objectives[0] → min objectives[2] → max aux_max_util).
+    auto findBest = [](const std::vector<Individual>& p) -> const Individual& {
+        return *std::min_element(p.begin(), p.end(),
+            [](const Individual& a, const Individual& b) {
+                if (a.objectives[0] != b.objectives[0]) return a.objectives[0] < b.objectives[0];
+                if (a.objectives[2] != b.objectives[2]) return a.objectives[2] < b.objectives[2];
+                return a.aux_max_util > b.aux_max_util;
+            });
+    };
+
+    // Lambda: decode the best individual and append a GASnapshot to ga_history.
+    auto recordSnapshot = [&](int gen_idx, const std::vector<Individual>& p) {
+        if (!ga_history) return;
+        const Individual& best = findBest(p);
+        int unplaced = 0;
+        GASnapshot snap;
+        snap.generation           = gen_idx;
+        snap.best_container_count = static_cast<int>(best.objectives[0]);
+        snap.best_avg_utilization = -best.objectives[1];
+        snap.solution = Packer::decode(
+            best.chromosome, residualCounts, itemTypes, seedContainers, unplaced, relaxed);
+        ga_history->push_back(std::move(snap));
+    };
+
+    // Record generation 0 (initial population, before any evolution).
+    recordSnapshot(0, pop);
 
     // ── Generational loop ────────────────────────────────────────────────────
     for (int gen = 0; gen < Config::GA_NGEN; ++gen) {
@@ -307,7 +361,7 @@ std::vector<Individual> run(
 
         // ── Evaluate offspring ───────────────────────────────────────────────
         for (Individual& ind : offspring) {
-            evaluateFitness(ind, residualCounts, itemTypes, seedContainers);
+            evaluateFitness(ind, residualCounts, itemTypes, seedContainers, relaxed);
         }
 
         // ── Mu+Lambda selection: parents + offspring → next generation ───────
@@ -328,6 +382,16 @@ std::vector<Individual> run(
             stagnation = 0;
         } else {
             ++stagnation;
+        }
+
+        // Record snapshot for this generation if it falls on the interval.
+        // Generation 0 was already recorded above. The final generation is
+        // always recorded (the break below fires after this check).
+        const bool is_last      = (stagnation >= Config::GA_MAX_STAGNATION)
+                                || (gen == Config::GA_NGEN - 1);
+        const bool on_interval  = ((gen + 1) % history_interval == 0);
+        if (ga_history && (on_interval || is_last)) {
+            recordSnapshot(gen + 1, pop);
         }
 
         if (stagnation >= Config::GA_MAX_STAGNATION) break;

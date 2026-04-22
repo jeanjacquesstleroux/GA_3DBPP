@@ -17,6 +17,7 @@
 #include "BlockBuilder.h"
 #include "BRReader.h"
 #include "CenterOfMass.h"
+#include "ExtremePointEngine.h"
 #include "LayerGenerator.h"
 #include "NSGA2.h"
 #include "Packer.h"
@@ -42,7 +43,9 @@ static const Individual& selectBest(const std::vector<Individual>& front)
         [](const Individual& a, const Individual& b) {
             if (a.objectives[0] != b.objectives[0])
                 return a.objectives[0] < b.objectives[0];
-            return a.objectives[2] < b.objectives[2];
+            if (a.objectives[2] != b.objectives[2])
+                return a.objectives[2] < b.objectives[2];
+            return a.aux_max_util > b.aux_max_util;
         });
 }
 
@@ -144,6 +147,11 @@ static bool allInBounds(const PackingSolution& sol)
 // Items resting directly on the floor (z == 0) are always supported.
 static bool allSupported(const PackingSolution& sol)
 {
+    // Use the default inset (Config::SUPPORT_VERTEX_INSET = 10 mm).
+    // Phase 2 items are placed by placeItem() which uses this same inset, so
+    // the audit and placement checks are consistent.  Phase 1 items (≥90% fill
+    // layers) pass easily because the 10 mm inset keeps test vertices well
+    // inside the item footprint and away from any 2 mm dynamic-shifting gaps.
     SupportChecker checker;
     for (const Container& c : sol.containers) {
         for (int i = 0; i < static_cast<int>(c.items.size()); ++i) {
@@ -475,5 +483,237 @@ TEST(BRBenchmark, FirstInstanceNoConstraintViolations)
 
     EXPECT_TRUE(noOverlaps(result.solution))    << "AABB overlap in BR instance 0";
     EXPECT_TRUE(allInBounds(result.solution))   << "Item out of bounds in BR instance 0";
+
+    // Diagnostic: dump all items in container 0, then print each failing item.
+    if (!result.solution.containers.empty()) {
+        const Container& c0 = result.solution.containers[0];
+        std::cout << "Container 0 has " << c0.items.size() << " items:\n";
+        for (int i = 0; i < static_cast<int>(c0.items.size()); ++i) {
+            const PlacedItem& pi = c0.items[i];
+            std::cout << "  [" << i << "] type=" << pi.item_type_index
+                      << " pos=(" << pi.x << "," << pi.y << "," << pi.z << ")"
+                      << " dim=(" << pi.dx << "x" << pi.dy << "x" << pi.dz << ")\n";
+        }
+    }
+
+    SupportChecker diag_sc;  // default inset=10: consistent with placeItem() standard
+    for (int ci = 0; ci < static_cast<int>(result.solution.containers.size()); ++ci) {
+        const Container& c = result.solution.containers[ci];
+        for (int i = 0; i < static_cast<int>(c.items.size()); ++i) {
+            const PlacedItem& pi = c.items[i];
+            if (pi.z == 0) continue;
+            // Compute support using only items placed BEFORE this one (simulates
+            // placement-time state) and using ALL items (post-hoc state).
+            std::vector<PlacedItem> placement_time_others;  // items 0..i-1
+            std::vector<PlacedItem> final_others;            // all except i
+            for (int j = 0; j < static_cast<int>(c.items.size()); ++j) {
+                if (j != i) final_others.push_back(c.items[j]);
+                if (j < i)  placement_time_others.push_back(c.items[j]);
+            }
+            const bool final_ok     = diag_sc.isSupported(pi, final_others);
+            const bool place_ok     = diag_sc.isSupported(pi, placement_time_others);
+            if (!final_ok) {
+                int sup_f = 0, sup_p = 0;
+                for (const PlacedItem& o : final_others)
+                    if (o.z + o.dz == pi.z) ++sup_f;
+                for (const PlacedItem& o : placement_time_others)
+                    if (o.z + o.dz == pi.z) ++sup_p;
+                ADD_FAILURE() << "Container " << ci << " item " << i
+                    << " type=" << pi.item_type_index
+                    << " pos=(" << pi.x << "," << pi.y << "," << pi.z << ")"
+                    << " dim=(" << pi.dx << "x" << pi.dy << "x" << pi.dz << ")"
+                    << " | final: " << sup_f << " supporters, pass=" << final_ok
+                    << " | at-placement: " << sup_p << " supporters, pass=" << place_ok;
+            }
+        }
+    }
     EXPECT_TRUE(allSupported(result.solution))  << "Unsupported item in BR instance 0";
+}
+
+// ─── Debug test: trace first type-1 placement in BR instance 0 ───────────────
+// NOT part of the Phase 8 suite — temporary diagnostic only.
+
+TEST(BRBenchmark, DebugFirstType1Placement)
+{
+    auto problems = loadBRFile("../../data/br_benchmark/thpack1.txt");
+    ASSERT_GE(static_cast<int>(problems.size()), 1);
+
+    const BRProblem& prob = problems[0];
+    const int PL = prob.L, PW = prob.W, PH = prob.H;
+
+    // Reconstruct Phase 1 container exactly as the pipeline does.
+    std::vector<Layer> all_layers;
+    for (int i = 0; i < static_cast<int>(prob.items.size()); ++i) {
+        all_layers.push_back(LayerGenerator::generateFull(prob.items[i], i, PL, PW));
+        for (Layer& lyr : LayerGenerator::generateHalves(prob.items[i], i, PL, PW))
+            all_layers.push_back(std::move(lyr));
+        for (Layer& lyr : LayerGenerator::generateQuarters(prob.items[i], i, PL, PW))
+            all_layers.push_back(std::move(lyr));
+    }
+    BlockBuilder::filterByFillRate(all_layers);
+    auto merged     = BlockBuilder::mergeLayers(std::move(all_layers), PL, PW);
+    auto containers = BlockBuilder::buildBlocks(merged, prob.items, PL, PW, PH);
+
+    ASSERT_GE(static_cast<int>(containers.size()), 1);
+    std::cout << "Phase 1 container 0 has " << containers[0].items.size() << " items.\n";
+
+    // Initialise EP list from Phase 1 items.
+    std::vector<ExtremePoint> eps;
+    ExtremePointEngine::init(eps, containers[0]);
+    std::cout << "Initial EP list (" << eps.size() << " EPs):\n";
+    for (const ExtremePoint& ep : eps)
+        std::cout << "  (" << ep.x << "," << ep.y << "," << ep.z << ")\n";
+
+    // Place the first 3 type-1 items with debug output.
+    std::cout << "\n--- Placing type-1 items (debug) ---\n";
+    for (int k = 0; k < 3; ++k) {
+        bool ok = ExtremePointEngine::placeItem(containers[0], prob.items, 1, eps, /*debug=*/true);
+        std::cout << "placeItem[" << k << "] returned " << ok << "\n";
+        if (!ok) break;
+        const PlacedItem& placed = containers[0].items.back();
+        std::cout << "  Placed at (" << placed.x << "," << placed.y << "," << placed.z
+                  << ") dim=(" << placed.dx << "x" << placed.dy << "x" << placed.dz << ")\n";
+    }
+    SUCCEED();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase B E2E tests — B1 (placement math), B4 (coordinate mapping)
+// ════════════════════════════════════════════════════════════════════════════
+
+// ─── B1-1: Single item placed at floor, dimensions preserved ─────────────────
+// A single box smaller than the pallet must land at z=0 with dx*dy*dz == l*w*h.
+// Verifies orientation logic does not corrupt volume.
+
+TEST(E2E_PlacementMath, SingleItemVolumePreserved)
+{
+    ItemType item;
+    item.l = 400; item.w = 300; item.h = 200; item.m = 5; item.q = 1;
+    const auto result = runPipeline({item});
+
+    ASSERT_EQ(result.unplaced, 0);
+    ASSERT_EQ(totalPlaced(result.solution), 1);
+
+    const PlacedItem& pi = result.solution.containers[0].items[0];
+    EXPECT_EQ(pi.z, 0) << "Single item must rest on the floor";
+    EXPECT_EQ(pi.dx * pi.dy * pi.dz, item.l * item.w * item.h)
+        << "Volume must be conserved regardless of orientation";
+    EXPECT_EQ(pi.dz, item.h) << "Height (dz) must always equal item.h (Z-rotation only)";
+    // dx and dy are {l,w} or {w,l} depending on orientation
+    const bool dims_ok = (pi.dx == item.l && pi.dy == item.w) ||
+                         (pi.dx == item.w && pi.dy == item.l);
+    EXPECT_TRUE(dims_ok) << "dx/dy must be {l,w} or {w,l}";
+}
+
+// ─── B1-2: Orientation correctness (Rotated90 swaps l and w, dz stays h) ─────
+
+TEST(E2E_PlacementMath, RotatedItemDimensionsCorrect)
+{
+    // Use a rectangular item where l != w so rotation is distinguishable.
+    ItemType item;
+    item.l = 600; item.w = 200; item.h = 150; item.m = 3; item.q = 1;
+    const auto result = runPipeline({item});
+
+    ASSERT_EQ(result.unplaced, 0);
+    ASSERT_EQ(totalPlaced(result.solution), 1);
+
+    const PlacedItem& pi = result.solution.containers[0].items[0];
+    EXPECT_EQ(pi.dz, item.h) << "dz must always equal item.h";
+    if (pi.orientation == Orientation::Original) {
+        EXPECT_EQ(pi.dx, item.l);
+        EXPECT_EQ(pi.dy, item.w);
+    } else {
+        EXPECT_EQ(pi.dx, item.w);
+        EXPECT_EQ(pi.dy, item.l);
+    }
+}
+
+// ─── B1-3: Utilization math — single item in default pallet ──────────────────
+// Utilization = item_volume / pallet_volume. Checks the formula is applied
+// correctly by computing it independently and comparing.
+
+TEST(E2E_PlacementMath, UtilizationMathCorrect)
+{
+    ItemType item;
+    item.l = 300; item.w = 200; item.h = 100; item.m = 1; item.q = 1;
+    const auto result = runPipeline({item});
+
+    ASSERT_EQ(result.unplaced, 0);
+    ASSERT_EQ(static_cast<int>(result.solution.containers.size()), 1);
+
+    const Container& c = result.solution.containers[0];
+    const double expected = static_cast<double>(item.l * item.w * item.h)
+                          / (static_cast<double>(c.L) * c.W * c.H);
+    EXPECT_NEAR(c.utilization(), expected, 1e-9);
+}
+
+// ─── B1-4: No item has z < 0 or negative dimensions ─────────────────────────
+
+TEST(E2E_PlacementMath, NoNegativeCoordinatesOrDimensions)
+{
+    std::vector<ItemType> items(3);
+    items[0].l = 200; items[0].w = 150; items[0].h = 100; items[0].m = 2; items[0].q = 5;
+    items[1].l = 300; items[1].w = 200; items[1].h = 120; items[1].m = 3; items[1].q = 4;
+    items[2].l = 100; items[2].w = 100; items[2].h = 80;  items[2].m = 1; items[2].q = 3;
+
+    const auto result = runPipeline(items);
+
+    for (const Container& cont : result.solution.containers) {
+        for (const PlacedItem& pi : cont.items) {
+            EXPECT_GE(pi.x, 0);
+            EXPECT_GE(pi.y, 0);
+            EXPECT_GE(pi.z, 0);
+            EXPECT_GT(pi.dx, 0);
+            EXPECT_GT(pi.dy, 0);
+            EXPECT_GT(pi.dz, 0);
+        }
+    }
+}
+
+// ─── B1-5: avgUtilization matches per-container sum ──────────────────────────
+// PackingSolution::avgUtilization() must equal the simple mean of per-container
+// utilizations, which we compute independently.
+
+TEST(E2E_PlacementMath, AvgUtilizationMatchesManualComputation)
+{
+    std::vector<ItemType> items(2);
+    items[0].l = 400; items[0].w = 300; items[0].h = 200; items[0].m = 5; items[0].q = 10;
+    items[1].l = 350; items[1].w = 250; items[1].h = 180; items[1].m = 4; items[1].q = 8;
+
+    const auto result = runPipeline(items);
+    ASSERT_FALSE(result.solution.containers.empty());
+
+    double manual_sum = 0.0;
+    for (const Container& c : result.solution.containers) {
+        manual_sum += c.utilization();
+    }
+    const double manual_avg = manual_sum / static_cast<double>(result.solution.containers.size());
+
+    EXPECT_NEAR(result.solution.avgUtilization(), manual_avg, 1e-9);
+}
+
+// ─── B4: Coordinate mapping — item near-corner vs extent ─────────────────────
+// The far corner of every placed item must equal (x+dx, y+dy, z+dz) and be
+// within container bounds. The near corner (x,y,z) must be non-negative.
+// This mirrors the JSON-schema guarantee: far_corner = (x+dx, y+dy, z+dz).
+
+TEST(E2E_CoordMapping, FarCornerWithinBounds)
+{
+    std::vector<ItemType> items(2);
+    items[0].l = 300; items[0].w = 200; items[0].h = 150; items[0].m = 3; items[0].q = 6;
+    items[1].l = 250; items[1].w = 180; items[1].h = 120; items[1].m = 2; items[1].q = 4;
+
+    const auto result = runPipeline(items);
+
+    for (const Container& cont : result.solution.containers) {
+        for (const PlacedItem& pi : cont.items) {
+            const auto ext = pi.extent();
+            EXPECT_LE(ext[0], cont.L) << "x+dx exceeds container L";
+            EXPECT_LE(ext[1], cont.W) << "y+dy exceeds container W";
+            EXPECT_LE(ext[2], cont.H) << "z+dz exceeds container H";
+            EXPECT_GE(pi.x, 0);
+            EXPECT_GE(pi.y, 0);
+            EXPECT_GE(pi.z, 0);
+        }
+    }
 }

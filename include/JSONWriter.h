@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include "AnimatedSolution.h"
 #include "Types.h"
 
 // Writes a PackingSolution to a JSON file for the Three.js visualiser.
@@ -25,3 +26,10 @@
 [[nodiscard]] bool writeJSON(const PackingSolution&       solution,
                              const std::vector<ItemType>& item_types,
                              const std::string&           path);
+
+// Writes an AnimatedSolution to solution_animated.json.
+// item_types is required so orig_l/w/h can be embedded alongside placed dims.
+// Returns true on success, false if the file cannot be opened.
+[[nodiscard]] bool writeAnimatedJSON(const AnimatedSolution&      solution,
+                                     const std::vector<ItemType>& item_types,
+                                     const std::string&           path);

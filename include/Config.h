@@ -50,6 +50,13 @@ namespace Config {
     constexpr int    GA_NGEN           =  30;  // maximum number of generations
     constexpr int    GA_MAX_STAGNATION =   5;  // stop early if best fitness unchanged this long
 
+    // ── Animated output — GA history recording interval ──────────────────────
+    // Under --animated-output, record a snapshot of the best packing every
+    // GA_HISTORY_INTERVAL generations.  Generation 0 and the final generation
+    // are always recorded regardless of this value.
+    // When GA_NGEN < 20, the interval is overridden to 1 (record every gen).
+    constexpr int    GA_HISTORY_INTERVAL = 5;
+
 } // namespace Config
 
 // Compile-time sanity checks on GA parameters.
